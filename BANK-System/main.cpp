@@ -26,7 +26,47 @@ string getCurrentTimestamp() {
     return string(str);
 }
 
-// 1. TRANSACTION MODEL
+// 1. APPLICATION MODEL (For account requests awaiting admin approval)
+struct AccountApplication {
+    int appId;
+    int customerId;
+    string name;
+    string mobile;
+    string address;
+    int age;
+    string email;
+    string accountType;
+    double initialDeposit;
+    size_t pinHash;
+    string status; // "PENDING", "APPROVED", "REJECTED"
+
+    string serialize() const {
+        return to_string(appId) + "|" + to_string(customerId) + "|" + name + "|" + mobile + "|" + 
+               address + "|" + to_string(age) + "|" + email + "|" + accountType + "|" + 
+               to_string(initialDeposit) + "|" + to_string(pinHash) + "|" + status;
+    }
+
+    static AccountApplication deserialize(const string& line) {
+        stringstream ss(line);
+        string item;
+        vector<string> tokens;
+        while (getline(ss, item, '|')) {
+            tokens.push_back(item);
+        }
+        if (tokens.size() == 11) {
+            try {
+                return {stoi(tokens[0]), stoi(tokens[1]), tokens[2], tokens[3], tokens[4],
+                        stoi(tokens[5]), tokens[6], tokens[7], stod(tokens[8]), 
+                        stoull(tokens[9]), tokens[10]};
+            } catch (...) {
+                return {0, 0, "", "", "", 0, "", "", 0.0, 0, ""};
+            }
+        }
+        return {0, 0, "", "", "", 0, "", "", 0.0, 0, ""};
+    }
+};
+
+// 2. TRANSACTION MODEL
 struct Transaction {
     int accountNumber;
     string timestamp;
@@ -56,11 +96,11 @@ struct Transaction {
     }
 };
 
-// 2. FIXED DEPOSIT MODEL
+// 3. FIXED DEPOSIT MODEL
 struct FixedDeposit {
     int fdId;
     int accountNumber;
-    string depositType; // "FD" or "RD"
+    string depositType;
     double principal;
     int tenureMonths;
     double interestRate;
@@ -92,7 +132,7 @@ struct FixedDeposit {
     }
 };
 
-// 3. CUSTOMER MODEL
+// 4. CUSTOMER MODEL
 class Customer {
 private:
     int customerId;
@@ -101,12 +141,13 @@ private:
     string address;
     int age;
     string email;
+    size_t customerPinHash;
 
 public:
-    Customer() : customerId(0), name(""), mobile(""), address(""), age(0), email("") {}
+    Customer() : customerId(0), name(""), mobile(""), address(""), age(0), email(""), customerPinHash(0) {}
 
-    Customer(int id, string n, string m, string a, int ag, string e)
-        : customerId(id), name(n), mobile(m), address(a), age(ag), email(e) {}
+    Customer(int id, string n, string m, string a, int ag, string e, size_t pinH)
+        : customerId(id), name(n), mobile(m), address(a), age(ag), email(e), customerPinHash(pinH) {}
 
     int getCustomerId() const { return customerId; }
     string getName() const { return name; }
@@ -114,6 +155,11 @@ public:
     string getAddress() const { return address; }
     int getAge() const { return age; }
     string getEmail() const { return email; }
+
+    bool verifyPin(const string& enteredPin) const {
+        hash<string> hasher;
+        return hasher(enteredPin) == customerPinHash;
+    }
 
     void setMobile(const string& m) { mobile = m; }
     void setAddress(const string& a) { address = a; }
@@ -130,7 +176,8 @@ public:
     }
 
     string serialize() const {
-        return to_string(customerId) + "|" + name + "|" + mobile + "|" + address + "|" + to_string(age) + "|" + email;
+        return to_string(customerId) + "|" + name + "|" + mobile + "|" + address + "|" + 
+               to_string(age) + "|" + email + "|" + to_string(customerPinHash);
     }
 
     static Customer deserialize(const string& line) {
@@ -140,9 +187,10 @@ public:
         while (getline(ss, item, '|')) {
             tokens.push_back(item);
         }
-        if (tokens.size() == 6) {
+        if (tokens.size() == 7) {
             try {
-                return Customer(stoi(tokens[0]), tokens[1], tokens[2], tokens[3], stoi(tokens[4]), tokens[5]);
+                return Customer(stoi(tokens[0]), tokens[1], tokens[2], tokens[3], 
+                                stoi(tokens[4]), tokens[5], stoull(tokens[6]));
             } catch (...) {
                 return Customer();
             }
@@ -151,20 +199,19 @@ public:
     }
 };
 
-// 4. ACCOUNT BASE MODEL
+// 5. ACCOUNT BASE MODEL
 class Account {
 protected:
     int accountNumber;
     int customerId;
     double balance;
     string accountType;
-    size_t pinHash;
 
 public:
-    Account() : accountNumber(0), customerId(0), balance(0.0), accountType("SAVINGS"), pinHash(0) {}
+    Account() : accountNumber(0), customerId(0), balance(0.0), accountType("SAVINGS") {}
 
-    Account(int accNum, int custId, double initialDeposit, string accType, size_t hashVal)
-        : accountNumber(accNum), customerId(custId), balance(initialDeposit), accountType(accType), pinHash(hashVal) {}
+    Account(int accNum, int custId, double initialDeposit, string accType)
+        : accountNumber(accNum), customerId(custId), balance(initialDeposit), accountType(accType) {}
 
     virtual ~Account() {}
 
@@ -172,11 +219,6 @@ public:
     int getCustomerId() const { return customerId; }
     double getBalance() const { return balance; }
     string getAccountType() const { return accountType; }
-
-    bool verifyPin(const string& enteredPin) const {
-        hash<string> hasher;
-        return hasher(enteredPin) == pinHash;
-    }
 
     void deposit(double amount) {
         balance += amount;
@@ -187,21 +229,21 @@ public:
     virtual void applyMonthlyCharges(vector<Transaction>& txLog) = 0;
 
     virtual string serialize() const {
-        return to_string(accountNumber) + "|" + to_string(customerId) + "|" + to_string(balance) + "|" + accountType + "|" + to_string(pinHash);
+        return to_string(accountNumber) + "|" + to_string(customerId) + "|" + to_string(balance) + "|" + accountType;
     }
 
     static Account* deserialize(const string& line);
 };
 
-// 5. SAVINGS ACCOUNT
+// 6. SAVINGS ACCOUNT
 class SavingsAccount : public Account {
 public:
     static constexpr double MIN_BALANCE = 500.0;
     static constexpr double LOW_BAL_FEE = 25.0;
     static constexpr double WITHDRAW_LIMIT = 20000.0;
 
-    SavingsAccount(int accNum, int custId, double initialDeposit, size_t hashVal)
-        : Account(accNum, custId, initialDeposit, "SAVINGS", hashVal) {}
+    SavingsAccount(int accNum, int custId, double initialDeposit)
+        : Account(accNum, custId, initialDeposit, "SAVINGS") {}
 
     bool canWithdraw(double amount) const override {
         if (amount > WITHDRAW_LIMIT || amount > balance) return false;
@@ -225,8 +267,7 @@ public:
         if (balance < MIN_BALANCE) {
             balance -= LOW_BAL_FEE;
             txLog.push_back({accountNumber, getCurrentTimestamp(), "MIN_BAL_FEE", LOW_BAL_FEE, balance});
-            cout << "[Notice] Balance fell below Rs " << fixed << setprecision(2) << MIN_BALANCE 
-                 << ". Charged penalty of Rs " << LOW_BAL_FEE << ". Final Balance: Rs " << balance << "\n";
+            cout << "[Notice] Minimum balance breached! Deducted fee of Rs " << LOW_BAL_FEE << ". Final: Rs " << balance << "\n";
         }
         return true;
     }
@@ -235,20 +276,20 @@ public:
         if (balance < MIN_BALANCE) {
             balance -= LOW_BAL_FEE;
             txLog.push_back({accountNumber, getCurrentTimestamp(), "MTH_PENALTY", LOW_BAL_FEE, balance});
-            cout << ">> Acc " << accountNumber << " (Savings): Debited Rs " << LOW_BAL_FEE << " for low balance.\n";
+            cout << ">> Acc " << accountNumber << " (Savings): Deducted Rs " << LOW_BAL_FEE << " for low balance.\n";
         }
     }
 };
 
-// 6. CURRENT ACCOUNT
+// 7. CURRENT ACCOUNT
 class CurrentAccount : public Account {
 public:
     static constexpr double MIN_BALANCE = 10000.0;
     static constexpr double MONTHLY_PENALTY = 500.0;
     static constexpr double OVERDRAFT_LIMIT = 25000.0;
 
-    CurrentAccount(int accNum, int custId, double initialDeposit, size_t hashVal)
-        : Account(accNum, custId, initialDeposit, "CURRENT", hashVal) {}
+    CurrentAccount(int accNum, int custId, double initialDeposit)
+        : Account(accNum, custId, initialDeposit, "CURRENT") {}
 
     bool canWithdraw(double amount) const override {
         if ((balance - amount) < -OVERDRAFT_LIMIT) return false;
@@ -257,7 +298,7 @@ public:
 
     bool withdraw(double amount, vector<Transaction>& txLog) override {
         if ((balance - amount) < -OVERDRAFT_LIMIT) {
-            cout << "[Error] Overdraft limit exceeded! Maximum allowed credit is Rs -" 
+            cout << "[Error] Overdraft limit breached! Maximum credit is Rs -" 
                  << fixed << setprecision(2) << OVERDRAFT_LIMIT << "\n";
             return false;
         }
@@ -267,7 +308,7 @@ public:
         cout << "[Success] Withdrew Rs " << fixed << setprecision(2) << amount << ". Remaining: Rs " << balance << "\n";
 
         if (balance < MIN_BALANCE) {
-            cout << "[Notice] Current Account balance is under minimum requirement of Rs 10000.00.\n";
+            cout << "[Notice] Balance is below Rs 10000.00.\n";
         }
         return true;
     }
@@ -276,8 +317,8 @@ public:
         if (balance < MIN_BALANCE) {
             balance -= MONTHLY_PENALTY;
             txLog.push_back({accountNumber, getCurrentTimestamp(), "MTH_PENALTY", MONTHLY_PENALTY, balance});
-            cout << ">> Acc " << accountNumber << " (Current): Below Rs 10,000 threshold. Debited Rs " 
-                 << MONTHLY_PENALTY << " penalty fee.\n";
+            cout << ">> Acc " << accountNumber << " (Current): Below minimum. Deducted Rs " 
+                 << MONTHLY_PENALTY << " penalty.\n";
         }
     }
 };
@@ -289,18 +330,17 @@ Account* Account::deserialize(const string& line) {
     while (getline(ss, item, '|')) {
         tokens.push_back(item);
     }
-    if (tokens.size() == 5) {
+    if (tokens.size() == 4) {
         try {
             int accNum = stoi(tokens[0]);
             int custId = stoi(tokens[1]);
             double bal = stod(tokens[2]);
             string type = tokens[3];
-            size_t hVal = stoull(tokens[4]);
 
             if (type == "CURRENT") {
-                return new CurrentAccount(accNum, custId, bal, hVal);
+                return new CurrentAccount(accNum, custId, bal);
             } else {
-                return new SavingsAccount(accNum, custId, bal, hVal);
+                return new SavingsAccount(accNum, custId, bal);
             }
         } catch (...) {
             return nullptr;
@@ -309,18 +349,20 @@ Account* Account::deserialize(const string& line) {
     return nullptr;
 }
 
-// 7. BANK SYSTEM CONTROLLER
+// 8. BANK SYSTEM CONTROLLER
 class BankSystem {
 private:
     vector<Customer> customers;
     vector<Account*> accounts;
     vector<Transaction> transactions;
     vector<FixedDeposit> deposits;
+    vector<AccountApplication> applications;
 
     const string customerFile = "customers.txt";
     const string accountFile = "accounts.txt";
     const string transactionFile = "transactions.txt";
     const string fdFile = "fds.txt";
+    const string appFile = "applications.txt";
     const string adminPin = "admin123";
 
     void clearBuffer() {
@@ -342,19 +384,25 @@ private:
         return nullptr;
     }
 
-    bool authenticate(Account* acc) {
+    vector<Account*> getAccountsForCustomer(int custId) {
+        vector<Account*> linked;
+        for (auto* a : accounts) {
+            if (a->getCustomerId() == custId) linked.push_back(a);
+        }
+        return linked;
+    }
+
+    bool authenticateCustomer(Customer* cust) {
         string pin;
         int attempts = 3;
         while (attempts > 0) {
-            cout << "Enter 4-Digit PIN (" << attempts << " attempts left): ";
+            cout << "Enter Your Customer PIN (" << attempts << " attempts remaining): ";
             cin >> pin;
-            if (acc->verifyPin(pin)) {
-                return true;
-            }
+            if (cust->verifyPin(pin)) return true;
             attempts--;
             cout << "[Error] Incorrect PIN.\n";
         }
-        cout << "[Access Denied] Maximum authentication attempts reached.\n";
+        cout << "[Access Denied] Authentication attempts exceeded.\n";
         return false;
     }
 
@@ -364,6 +412,7 @@ private:
         accounts.clear();
         transactions.clear();
         deposits.clear();
+        applications.clear();
 
         ifstream cIn(customerFile);
         string line;
@@ -392,6 +441,12 @@ private:
             if (!line.empty()) deposits.push_back(FixedDeposit::deserialize(line));
         }
         fIn.close();
+
+        ifstream appIn(appFile);
+        while (getline(appIn, line)) {
+            if (!line.empty()) applications.push_back(AccountApplication::deserialize(line));
+        }
+        appIn.close();
     }
 
     void saveData() {
@@ -410,6 +465,10 @@ private:
         ofstream fOut(fdFile);
         for (const auto& f : deposits) fOut << f.serialize() << "\n";
         fOut.close();
+
+        ofstream appOut(appFile);
+        for (const auto& ap : applications) appOut << ap.serialize() << "\n";
+        appOut.close();
     }
 
 public:
@@ -422,62 +481,244 @@ public:
     }
 
     // ==========================================
-    // CUSTOMER PORTAL METHODS
+    // ACCOUNT APPLICATION SUBMISSION
     // ==========================================
+    void applyForAccount() {
+        string name, mobile, address, email, pin;
+        int age, typeChoice, existingCustId = 0;
+        double initialDeposit;
+        char hasExistingId;
 
-    void customerPortal() {
-        int accNum;
-        cout << "\n--- Customer Portal Login ---\n";
-        cout << "Enter Your Account Number: ";
-        if (!(cin >> accNum)) { clearBuffer(); return; }
+        cout << "\n=========================================\n";
+        cout << "       NEW ACCOUNT APPLICATION FORM      \n";
+        cout << "=========================================\n";
+        cout << "Do you already hold a Customer ID with us? (y/n): ";
+        cin >> hasExistingId;
+        clearBuffer();
 
-        Account* acc = findAccount(accNum);
-        if (!acc) { cout << "[Error] Account not found.\n"; return; }
-
-        if (!authenticate(acc)) return;
-
-        int choice = 0;
-        while (choice != 8) {
-            cout << "\n=========================================\n";
-            cout << "       CUSTOMER ACCOUNT DASHBOARD       \n";
-            cout << "  Account: " << acc->getAccountNumber() << " (" << acc->getAccountType() << ")\n";
-            cout << "=========================================\n";
-            cout << "1. View Statement & Profile\n";
-            cout << "2. Quick Balance\n";
-            cout << "3. Deposit Funds\n";
-            cout << "4. Withdraw Funds\n";
-            cout << "5. Fund Transfer\n";
-            cout << "6. Open Fixed Deposit / RD\n";
-            cout << "7. View Active Deposits\n";
-            cout << "8. Logout\n";
-            cout << "Select (1-8): ";
-
-            if (!(cin >> choice)) {
+        if (tolower(hasExistingId) == 'y') {
+            cout << "Enter Existing Customer ID: ";
+            if (cin >> existingCustId) {
+                Customer* c = findCustomer(existingCustId);
+                if (!c) {
+                    cout << "[Error] Customer ID not found. Application aborted.\n";
+                    clearBuffer();
+                    return;
+                }
+                if (!authenticateCustomer(c)) return;
+                name = c->getName();
+                mobile = c->getMobile();
+                address = c->getAddress();
+                age = c->getAge();
+                email = c->getEmail();
+            } else {
                 clearBuffer();
-                continue;
+                return;
+            }
+        } else {
+            cout << "Full Legal Name: ";
+            getline(cin, name);
+
+            cout << "Mobile: ";
+            getline(cin, mobile);
+
+            cout << "Address: ";
+            getline(cin, address);
+
+            cout << "Age: ";
+            while (!(cin >> age) || age < 18) {
+                cout << "Must be 18 or older: ";
+                clearBuffer();
             }
 
-            switch (choice) {
-                case 1: displayAccountDetails(acc); break;
-                case 2:
-                    cout << "Current Balance: Rs " << fixed << setprecision(2) << acc->getBalance() << "\n";
-                    break;
-                case 3: deposit(acc); break;
-                case 4: withdraw(acc); break;
-                case 5: transferFunds(acc); break;
-                case 6: createDeposit(acc); break;
-                case 7: viewCustomerDeposits(acc->getAccountNumber()); break;
-                case 8: cout << "Logged out from customer portal.\n"; break;
-                default: cout << "Invalid choice.\n"; break;
+            cout << "Email: ";
+            clearBuffer();
+            getline(cin, email);
+
+            cout << "Set your 4-Digit Customer PIN: ";
+            while (true) {
+                cin >> pin;
+                if (pin.length() == 4 && pin.find_first_not_of("0123456789") == string::npos) break;
+                cout << "Invalid PIN. Must be exactly 4 digits: ";
+                clearBuffer();
             }
         }
+
+        cout << "Select Desired Account Type:\n";
+        cout << "  1. Savings Account (Min Deposit: Rs 500)\n";
+        cout << "  2. Current Account (Min Deposit: Rs 10,000)\n";
+        cout << "Choice (1-2): ";
+        while (!(cin >> typeChoice) || (typeChoice != 1 && typeChoice != 2)) {
+            cout << "Select 1 or 2: ";
+            clearBuffer();
+        }
+
+        string accType = (typeChoice == 1) ? "SAVINGS" : "CURRENT";
+        double requiredMin = (typeChoice == 1) ? 500.0 : 10000.0;
+
+        cout << "Planned Opening Deposit: Rs ";
+        while (!(cin >> initialDeposit) || initialDeposit < requiredMin) {
+            cout << "[Error] Minimum deposit is Rs " << fixed << setprecision(2) << requiredMin << ". Re-enter: Rs ";
+            clearBuffer();
+        }
+
+        int appId = applications.empty() ? 3001 : applications.back().appId + 1;
+        hash<string> hasher;
+        size_t pHash = (hasExistingId == 'y') ? 0 : hasher(pin);
+
+        applications.push_back({appId, existingCustId, name, mobile, address, age, email, accType, initialDeposit, pHash, "PENDING"});
+        saveData();
+
+        cout << "\n[Application Submitted Successfully!]\n";
+        cout << "Your Application ID: " << appId << "\n";
+        cout << "Status: PENDING REVIEW by bank administration.\n";
+    }
+
+    // ==========================================
+    // CUSTOMER PORTAL (RELATIONAL 1:N)
+    // ==========================================
+    void customerPortal() {
+        int custId;
+        cout << "\n--- Customer Secure Gateway ---\n";
+        cout << "Enter Your Customer ID: ";
+        if (!(cin >> custId)) { clearBuffer(); return; }
+
+        Customer* cust = findCustomer(custId);
+        if (!cust) {
+            cout << "[Error] Customer ID not found.\n";
+            return;
+        }
+
+        if (!authenticateCustomer(cust)) return;
+
+        int choice = 0;
+        while (choice != 3) {
+            vector<Account*> myAccounts = getAccountsForCustomer(custId);
+
+            cout << "\n=========================================\n";
+            cout << "       CUSTOMER PORTAL: " << cust->getName() << "\n";
+            cout << "       Customer ID: " << custId << "\n";
+            cout << "=========================================\n";
+            cout << "1. Manage Accounts (" << myAccounts.size() << " Active)\n";
+            cout << "2. Internal Transfer (Between My Own Accounts)\n";
+            cout << "3. Logout\n";
+            cout << "Select (1-3): ";
+
+            if (!(cin >> choice)) { clearBuffer(); continue; }
+
+            if (choice == 1) {
+                if (myAccounts.empty()) {
+                    cout << "[Notice] No active accounts found. Apply for one from the main menu.\n";
+                    continue;
+                }
+
+                cout << "\nLinked Accounts:\n";
+                for (size_t i = 0; i < myAccounts.size(); ++i) {
+                    cout << "  " << (i + 1) << ". Account #" << myAccounts[i]->getAccountNumber() 
+                         << " (" << myAccounts[i]->getAccountType() << ") | Balance: Rs " 
+                         << fixed << setprecision(2) << myAccounts[i]->getBalance() << "\n";
+                }
+                cout << "Select an Account (1-" << myAccounts.size() << ") or 0 to return: ";
+                int accIdx;
+                if (cin >> accIdx && accIdx > 0 && accIdx <= static_cast<int>(myAccounts.size())) {
+                    manageSingleAccount(myAccounts[accIdx - 1], cust);
+                }
+            } else if (choice == 2) {
+                executeInternalTransfer(myAccounts);
+            }
+        }
+    }
+
+    void manageSingleAccount(Account* acc, Customer* cust) {
+        int choice = 0;
+        while (choice != 8) {
+            cout << "\n-----------------------------------------\n";
+            cout << "  DASHBOARD: Account #" << acc->getAccountNumber() 
+                 << " (" << acc->getAccountType() << ")\n";
+            cout << "  Current Balance: Rs " << fixed << setprecision(2) << acc->getBalance() << "\n";
+            cout << "-----------------------------------------\n";
+            cout << "1. View Statement\n";
+            cout << "2. Deposit Funds\n";
+            cout << "3. Withdraw Funds\n";
+            cout << "4. Third-Party Transfer\n";
+            cout << "5. Open FD / RD Term Deposit\n";
+            cout << "6. View Term Deposits\n";
+            cout << "7. Export Statement to CSV (Excel)\n";
+            cout << "8. Return to Account List\n";
+            cout << "Select (1-8): ";
+
+            if (!(cin >> choice)) { clearBuffer(); continue; }
+
+            switch (choice) {
+                case 1: displayAccountDetails(acc, cust); break;
+                case 2: deposit(acc); break;
+                case 3: withdraw(acc); break;
+                case 4: transferFunds(acc); break;
+                case 5: createDeposit(acc); break;
+                case 6: viewCustomerDeposits(acc->getAccountNumber()); break;
+                case 7: exportStatementCSV(acc, cust); break;
+                case 8: break;
+                default: cout << "Invalid option.\n"; break;
+            }
+        }
+    }
+
+    void executeInternalTransfer(const vector<Account*>& myAccounts) {
+        if (myAccounts.size() < 2) {
+            cout << "[Error] You need at least 2 active accounts for internal self-transfers.\n";
+            return;
+        }
+
+        cout << "\n--- Internal Transfer Between Your Accounts ---\n";
+        for (size_t i = 0; i < myAccounts.size(); ++i) {
+            cout << "  " << (i + 1) << ". #" << myAccounts[i]->getAccountNumber() 
+                 << " (" << myAccounts[i]->getAccountType() << ") - Rs " << myAccounts[i]->getBalance() << "\n";
+        }
+
+        int srcIdx, destIdx;
+        cout << "Select Source Account (1-" << myAccounts.size() << "): ";
+        cin >> srcIdx;
+        cout << "Select Destination Account (1-" << myAccounts.size() << "): ";
+        cin >> destIdx;
+
+        if (srcIdx < 1 || srcIdx > static_cast<int>(myAccounts.size()) || 
+            destIdx < 1 || destIdx > static_cast<int>(myAccounts.size()) || srcIdx == destIdx) {
+            cout << "[Error] Invalid selection.\n";
+            return;
+        }
+
+        Account* src = myAccounts[srcIdx - 1];
+        Account* dest = myAccounts[destIdx - 1];
+        double amount;
+
+        cout << "Enter Transfer Amount: Rs ";
+        if (!(cin >> amount) || amount <= 0) {
+            cout << "[Error] Invalid amount.\n";
+            clearBuffer();
+            return;
+        }
+
+        if (!src->canWithdraw(amount)) {
+            cout << "[Transfer Failed] Insufficient balance or overdraft limit reached on source account.\n";
+            return;
+        }
+
+        string timeNow = getCurrentTimestamp();
+        src->withdraw(amount, transactions);
+        transactions.back().type = "INTERNAL_TO_" + to_string(dest->getAccountNumber());
+
+        dest->deposit(amount);
+        transactions.push_back({dest->getAccountNumber(), timeNow, "INTERNAL_FROM_" + to_string(src->getAccountNumber()), amount, dest->getBalance()});
+
+        saveData();
+        cout << "[Success] Transferred Rs " << fixed << setprecision(2) << amount << " between your accounts.\n";
     }
 
     void deposit(Account* acc) {
         double amount;
         cout << "Enter Deposit Amount: Rs ";
         if (!(cin >> amount) || amount <= 0) {
-            cout << "[Error] Invalid deposit amount.\n";
+            cout << "[Error] Invalid amount.\n";
             clearBuffer();
             return;
         }
@@ -493,7 +734,7 @@ public:
         double amount;
         cout << "Enter Withdrawal Amount: Rs ";
         if (!(cin >> amount) || amount <= 0) {
-            cout << "[Error] Invalid withdrawal amount.\n";
+            cout << "[Error] Invalid amount.\n";
             clearBuffer();
             return;
         }
@@ -511,19 +752,19 @@ public:
         if (!(cin >> receiverAccNum)) { clearBuffer(); return; }
 
         if (sender->getAccountNumber() == receiverAccNum) {
-            cout << "[Error] Source and Destination accounts cannot be identical.\n";
+            cout << "[Error] Source and destination accounts cannot be identical.\n";
             return;
         }
 
         Account* receiver = findAccount(receiverAccNum);
         if (!receiver) {
-            cout << "[Error] Destination account does not exist.\n";
+            cout << "[Error] Beneficiary account does not exist.\n";
             return;
         }
 
         cout << "Enter Transfer Amount: Rs ";
         if (!(cin >> amount) || amount <= 0) {
-            cout << "[Error] Invalid transfer amount.\n";
+            cout << "[Error] Invalid amount.\n";
             clearBuffer();
             return;
         }
@@ -549,9 +790,9 @@ public:
         int dTypeChoice, tenure;
         double principal;
 
-        cout << "\n--- Investment Products Engine ---\n";
-        cout << "1. Fixed Deposit (FD) - Lump sum compound deposit\n";
-        cout << "2. Recurring Deposit (RD) - Monthly investment model\n";
+        cout << "\n--- Fixed / Recurring Term Deposit Engine ---\n";
+        cout << "1. Fixed Deposit (FD)\n";
+        cout << "2. Recurring Deposit (RD)\n";
         cout << "Select (1-2): ";
         if (!(cin >> dTypeChoice) || (dTypeChoice != 1 && dTypeChoice != 2)) {
             cout << "[Error] Invalid selection.\n";
@@ -561,15 +802,15 @@ public:
 
         string depType = (dTypeChoice == 1) ? "FD" : "RD";
 
-        cout << "Enter Principal / Investment Amount: Rs ";
+        cout << "Enter Investment Principal: Rs ";
         if (!(cin >> principal) || principal <= 0) {
-            cout << "[Error] Invalid principal amount.\n";
+            cout << "[Error] Invalid principal.\n";
             clearBuffer();
             return;
         }
 
         if (principal > acc->getBalance()) {
-            cout << "[Error] Insufficient balance in linked account to fund investment.\n";
+            cout << "[Error] Account balance insufficient to fund investment.\n";
             return;
         }
 
@@ -580,17 +821,14 @@ public:
             return;
         }
 
-        // Slab-based Interest Matrix
         double rate = 5.0;
         if (tenure >= 12 && tenure < 24) rate = 6.5;
         else if (tenure >= 24 && tenure < 36) rate = 7.1;
         else if (tenure >= 36) rate = 7.5;
 
-        // Compound Maturity: A = P(1 + r/n)^(n*t), compounded quarterly (n=4)
         double timeInYears = static_cast<double>(tenure) / 12.0;
         double maturity = principal * pow(1.0 + (rate / (100.0 * 4.0)), 4.0 * timeInYears);
 
-        // Deduct principal from source account
         acc->withdraw(principal, transactions);
         transactions.back().type = depType + "_CREATION";
 
@@ -598,14 +836,14 @@ public:
         deposits.push_back({fdId, acc->getAccountNumber(), depType, principal, tenure, rate, maturity, getCurrentTimestamp()});
         saveData();
 
-        cout << "\n[" << depType << " Successfully Created]\n";
+        cout << "\n[" << depType << " Successfully Opened]\n";
         cout << "Deposit ID     : " << fdId << "\n";
         cout << "Interest Rate  : " << rate << "% p.a.\n";
-        cout << "Maturity Value : Rs " << fixed << setprecision(2) << maturity << "\n";
+        cout << "Maturity Yield : Rs " << fixed << setprecision(2) << maturity << "\n";
     }
 
     void viewCustomerDeposits(int accNum) {
-        cout << "\n--- Active FD / RD Holdings for Account " << accNum << " ---\n";
+        cout << "\n--- Active FD / RD Holdings (Account #" << accNum << ") ---\n";
         bool hasDeposits = false;
         cout << left << setw(8) << "ID" 
              << setw(6) << "Type" 
@@ -628,34 +866,72 @@ public:
                      << setw(21) << d.creationDate << "\n";
             }
         }
-        if (!hasDeposits) cout << "No FD/RD records linked to this account.\n";
+        if (!hasDeposits) cout << "No term deposits linked to this account.\n";
     }
 
-    void displayAccountDetails(Account* acc) {
-        Customer* cust = findCustomer(acc->getCustomerId());
-        if (!cust) { cout << "[Error] Customer profile missing.\n"; return; }
+    void exportStatementCSV(Account* acc, Customer* cust) {
+        string filename = "statement_" + to_string(acc->getAccountNumber()) + ".csv";
+        ofstream csvOut(filename);
 
+        if (!csvOut.is_open()) {
+            cout << "[Error] Unable to generate CSV file.\n";
+            return;
+        }
+
+        csvOut << "OFFICIAL BANK STATEMENT\n";
+        csvOut << "Generated On," << getCurrentTimestamp() << "\n\n";
+
+        if (cust) {
+            csvOut << "CUSTOMER PROFILE\n";
+            csvOut << "Customer ID," << cust->getCustomerId() << "\n";
+            csvOut << "Name," << cust->getName() << "\n";
+            csvOut << "Mobile," << cust->getMobile() << "\n";
+            csvOut << "Email," << cust->getEmail() << "\n\n";
+        }
+
+        csvOut << "ACCOUNT DETAILS\n";
+        csvOut << "Account Number," << acc->getAccountNumber() << "\n";
+        csvOut << "Account Type," << acc->getAccountType() << "\n";
+        csvOut << "Current Balance,Rs " << fixed << setprecision(2) << acc->getBalance() << "\n\n";
+
+        csvOut << "TRANSACTION LEDGER\n";
+        csvOut << "Date & Time,Transaction Type,Amount (Rs),Balance After (Rs)\n";
+
+        for (const auto& tx : transactions) {
+            if (tx.accountNumber == acc->getAccountNumber()) {
+                csvOut << tx.timestamp << ","
+                       << tx.type << ","
+                       << fixed << setprecision(2) << tx.amount << ","
+                       << fixed << setprecision(2) << tx.balanceAfter << "\n";
+            }
+        }
+
+        csvOut.close();
+        cout << "[Success] Statement exported to " << filename << " (Ready for Excel/Sheets)\n";
+    }
+
+    void displayAccountDetails(Account* acc, Customer* cust) {
         cout << "\n======================================================================\n";
         cout << "                       ACCOUNT SUMMARY STATEMENT                      \n";
         cout << "======================================================================\n";
         cout << "Account No      : " << acc->getAccountNumber() << "\n";
         cout << "Account Type    : " << acc->getAccountType() << "\n";
         cout << "Current Balance : Rs " << fixed << setprecision(2) << acc->getBalance() << "\n";
-        cust->displayProfile();
+        if (cust) cust->displayProfile();
 
         cout << "\n--- Transaction History ---\n";
         bool hasTx = false;
         cout << left << setw(21) << "Date & Time"
-             << setw(20) << "Type" 
+             << setw(22) << "Type" 
              << setw(14) << "Amount (Rs)" 
              << setw(16) << "Balance After" << "\n";
-        cout << string(71, '-') << "\n";
+        cout << string(73, '-') << "\n";
 
         for (const auto& tx : transactions) {
             if (tx.accountNumber == acc->getAccountNumber()) {
                 hasTx = true;
                 cout << left << setw(21) << tx.timestamp
-                     << setw(20) << tx.type 
+                     << setw(22) << tx.type 
                      << setw(14) << fixed << setprecision(2) << tx.amount 
                      << setw(16) << fixed << setprecision(2) << tx.balanceAfter << "\n";
             }
@@ -665,9 +941,8 @@ public:
     }
 
     // ==========================================
-    // ADMIN / MANAGER PORTAL METHODS
+    // ADMIN / MANAGER PORTAL
     // ==========================================
-
     void adminPortal() {
         string pin;
         cout << "\n--- Manager Security Authentication ---\n";
@@ -675,48 +950,106 @@ public:
         cin >> pin;
 
         if (pin != adminPin) {
-            cout << "[Security Alert] Unauthorized access attempt blocked.\n";
+            cout << "[Security Alert] Unauthorized access rejected.\n";
             return;
         }
 
         int choice = 0;
-        while (choice != 7) {
+        while (choice != 8) {
             cout << "\n=========================================\n";
             cout << "       ADMIN & AUDIT CONTROL PANEL       \n";
             cout << "=========================================\n";
-            cout << "1. Open New Customer Account\n";
+            cout << "1. Review Pending Account Applications (" << countPendingApplications() << " Pending)\n";
             cout << "2. View Bank Capital Reserves & Audits\n";
             cout << "3. List All Customers & Linked Accounts\n";
             cout << "4. Update Customer Information\n";
             cout << "5. Run Monthly Account Maintenance Audit\n";
-            cout << "6. Inspect Master Ledger / System Statements\n";
-            cout << "7. Return to Main Screen\n";
-            cout << "Select (1-7): ";
+            cout << "6. Inspect Master Statement of an Account\n";
+            cout << "7. Direct Admin Account Onboarding\n";
+            cout << "8. Return to Gateway\n";
+            cout << "Select (1-8): ";
 
-            if (!(cin >> choice)) {
-                clearBuffer();
-                continue;
-            }
+            if (!(cin >> choice)) { clearBuffer(); continue; }
 
             switch (choice) {
-                case 1: onboardCustomer(); break;
+                case 1: processApplications(); break;
                 case 2: viewBankReserves(); break;
                 case 3: listAllAccounts(); break;
                 case 4: updateCustomer(); break;
                 case 5: runMonthlyMaintenanceCycle(); break;
                 case 6: inspectMasterStatement(); break;
-                case 7: cout << "Exited admin control panel.\n"; break;
+                case 7: directAdminOnboarding(); break;
+                case 8: cout << "Exited admin control panel.\n"; break;
                 default: cout << "Invalid option.\n"; break;
             }
         }
     }
 
-    void onboardCustomer() {
+    int countPendingApplications() {
+        int c = 0;
+        for (const auto& a : applications) if (a.status == "PENDING") c++;
+        return c;
+    }
+
+    void processApplications() {
+        cout << "\n--- Review Customer Account Applications ---\n";
+        bool hasPending = false;
+        for (auto& app : applications) {
+            if (app.status == "PENDING") {
+                hasPending = true;
+                cout << "\n[Application #" << app.appId << "]\n";
+                cout << "Customer Name : " << app.name << "\n";
+                cout << "Age           : " << app.age << " | Mobile: " << app.mobile << "\n";
+                cout << "Email         : " << app.email << "\n";
+                cout << "Address       : " << app.address << "\n";
+                cout << "Account Type  : " << app.accountType << "\n";
+                cout << "Opening Dep   : Rs " << fixed << setprecision(2) << app.initialDeposit << "\n";
+                if (app.customerId != 0) {
+                    cout << "Linking to    : Existing Customer ID " << app.customerId << "\n";
+                } else {
+                    cout << "New Profile   : New Customer Registration\n";
+                }
+
+                char decision;
+                cout << "Action: [A]pprove, [R]eject, [S]kip: ";
+                cin >> decision;
+                decision = toupper(decision);
+
+                if (decision == 'A') {
+                    app.status = "APPROVED";
+                    int assignedCustId = app.customerId;
+                    if (assignedCustId == 0) {
+                        assignedCustId = customers.empty() ? 5001 : customers.back().getCustomerId() + 1;
+                        customers.emplace_back(assignedCustId, app.name, app.mobile, app.address, app.age, app.email, app.pinHash);
+                    }
+
+                    int newAccNum = accounts.empty() ? 10001 : accounts.back()->getAccountNumber() + 1;
+                    if (app.accountType == "SAVINGS") {
+                        accounts.push_back(new SavingsAccount(newAccNum, assignedCustId, app.initialDeposit));
+                    } else {
+                        accounts.push_back(new CurrentAccount(newAccNum, assignedCustId, app.initialDeposit));
+                    }
+
+                    transactions.push_back({newAccNum, getCurrentTimestamp(), "INITIAL_DEP", app.initialDeposit, app.initialDeposit});
+                    saveData();
+
+                    cout << "[Approved] Account #" << newAccNum << " assigned to Customer ID " << assignedCustId << "\n";
+                } else if (decision == 'R') {
+                    app.status = "REJECTED";
+                    saveData();
+                    cout << "[Rejected] Application #" << app.appId << " was marked rejected.\n";
+                }
+            }
+        }
+        if (!hasPending) cout << "No pending applications to review.\n";
+    }
+
+    void directAdminOnboarding() {
         string name, mobile, address, email, pin;
-        int age, accountTypeChoice;
+        int age, typeChoice;
         double initialDeposit;
 
-        cout << "\n===== Customer Registration =====\n";
+        cout << "\n--- Direct In-Branch Onboarding ---\n";
         cout << "Full Name: ";
         clearBuffer();
         getline(cin, name);
@@ -729,7 +1062,7 @@ public:
 
         cout << "Age: ";
         while (!(cin >> age) || age < 18) {
-            cout << "Invalid. Minimum age is 18: ";
+            cout << "Must be 18 or older: ";
             clearBuffer();
         }
 
@@ -737,7 +1070,7 @@ public:
         clearBuffer();
         getline(cin, email);
 
-        cout << "Assign Customer a 4-Digit PIN: ";
+        cout << "Set Customer 4-Digit PIN: ";
         while (true) {
             cin >> pin;
             if (pin.length() == 4 && pin.find_first_not_of("0123456789") == string::npos) break;
@@ -745,19 +1078,16 @@ public:
             clearBuffer();
         }
 
-        cout << "Select Account Type:\n";
-        cout << "  1. Savings Account (Minimum Deposit: Rs 500)\n";
-        cout << "  2. Current Account (Minimum Deposit: Rs 10,000 | Low-Balance Monthly Fee: Rs 500)\n";
-        cout << "Choice (1-2): ";
-        while (!(cin >> accountTypeChoice) || (accountTypeChoice != 1 && accountTypeChoice != 2)) {
-            cout << "Invalid choice. Select 1 or 2: ";
+        cout << "Select Account Type (1. Savings | 2. Current): ";
+        while (!(cin >> typeChoice) || (typeChoice != 1 && typeChoice != 2)) {
+            cout << "Select 1 or 2: ";
             clearBuffer();
         }
 
-        double requiredDeposit = (accountTypeChoice == 1) ? 500.0 : 10000.0;
-        cout << "Initial Opening Deposit: Rs ";
+        double requiredDeposit = (typeChoice == 1) ? 500.0 : 10000.0;
+        cout << "Initial Deposit: Rs ";
         while (!(cin >> initialDeposit) || initialDeposit < requiredDeposit) {
-            cout << "[Error] Minimum deposit is Rs " << fixed << setprecision(2) << requiredDeposit << ". Re-enter: Rs ";
+            cout << "[Error] Minimum deposit is Rs " << fixed << setprecision(2) << requiredDeposit << ": Rs ";
             clearBuffer();
         }
 
@@ -765,29 +1095,24 @@ public:
         int accNum = accounts.empty() ? 10001 : accounts.back()->getAccountNumber() + 1;
 
         hash<string> hasher;
-        size_t pinHash = hasher(pin);
+        customers.emplace_back(custId, name, mobile, address, age, email, hasher(pin));
 
-        customers.emplace_back(custId, name, mobile, address, age, email);
-
-        if (accountTypeChoice == 1) {
-            accounts.push_back(new SavingsAccount(accNum, custId, initialDeposit, pinHash));
+        if (typeChoice == 1) {
+            accounts.push_back(new SavingsAccount(accNum, custId, initialDeposit));
         } else {
-            accounts.push_back(new CurrentAccount(accNum, custId, initialDeposit, pinHash));
+            accounts.push_back(new CurrentAccount(accNum, custId, initialDeposit));
         }
 
         transactions.push_back({accNum, getCurrentTimestamp(), "INITIAL_DEP", initialDeposit, initialDeposit});
         saveData();
 
-        cout << "\n[Account Created Successfully]\n";
-        cout << "Customer ID  : " << custId << "\n";
-        cout << "Account No   : " << accNum << "\n";
-        cout << "Account Type : " << (accountTypeChoice == 1 ? "SAVINGS" : "CURRENT") << "\n";
+        cout << "\n[Account Created Immediately]\n";
+        cout << "Customer ID : " << custId << "\n";
+        cout << "Account No  : " << accNum << "\n";
     }
 
     void viewBankReserves() {
-        double totalLiquid = 0.0;
-        double totalLockedFD = 0.0;
-
+        double totalLiquid = 0.0, totalLockedFD = 0.0;
         for (const auto* a : accounts) totalLiquid += a->getBalance();
         for (const auto& d : deposits) totalLockedFD += d.principal;
 
@@ -803,22 +1128,31 @@ public:
     }
 
     void listAllAccounts() {
-        cout << "\n--- Master Account Roster ---\n";
-        cout << left << setw(12) << "Acc No" 
-             << setw(10) << "Cust ID" 
+        cout << "\n--- Master Customer & Linked Accounts Roster ---\n";
+        cout << left << setw(10) << "Cust ID" 
              << setw(20) << "Holder Name" 
+             << setw(12) << "Acc No" 
              << setw(12) << "Type" 
              << setw(16) << "Balance (Rs)" << "\n";
         cout << string(70, '-') << "\n";
 
-        for (const auto* a : accounts) {
-            Customer* c = findCustomer(a->getCustomerId());
-            string name = c ? c->getName() : "Unknown";
-            cout << left << setw(12) << a->getAccountNumber()
-                 << setw(10) << a->getCustomerId()
-                 << setw(20) << name
-                 << setw(12) << a->getAccountType()
-                 << "Rs " << setw(13) << fixed << setprecision(2) << a->getBalance() << "\n";
+        for (const auto& c : customers) {
+            vector<Account*> linked = getAccountsForCustomer(c.getCustomerId());
+            if (linked.empty()) {
+                cout << left << setw(10) << c.getCustomerId()
+                     << setw(20) << c.getName()
+                     << setw(12) << "NO ACCOUNTS"
+                     << setw(12) << "-"
+                     << setw(16) << "-" << "\n";
+            } else {
+                for (const auto* a : linked) {
+                    cout << left << setw(10) << c.getCustomerId()
+                         << setw(20) << c.getName()
+                         << setw(12) << a->getAccountNumber()
+                         << setw(12) << a->getAccountType()
+                         << "Rs " << setw(13) << fixed << setprecision(2) << a->getBalance() << "\n";
+                }
+            }
         }
     }
 
@@ -832,8 +1166,8 @@ public:
 
         int choice = 0;
         do {
-            cout << "\n--- Update Records (" << cust->getName() << ") ---\n";
-            cout << "1. Mobile | 2. Address | 3. Email | 4. Save & Exit\n";
+            cout << "\n--- Update Profile (" << cust->getName() << ") ---\n";
+            cout << "1. Mobile | 2. Address | 3. Email | 4. Finish & Save\n";
             cout << "Choice: ";
             if (!(cin >> choice)) { clearBuffer(); continue; }
             clearBuffer();
@@ -856,7 +1190,7 @@ public:
             acc->applyMonthlyCharges(transactions);
         }
         saveData();
-        cout << "[Complete] System audits executed and penalty debits committed to disk.\n";
+        cout << "[Complete] System audit processed and written to disk.\n";
     }
 
     void inspectMasterStatement() {
@@ -867,34 +1201,37 @@ public:
         Account* acc = findAccount(accNum);
         if (!acc) { cout << "[Error] Account not found.\n"; return; }
 
-        displayAccountDetails(acc);
+        Customer* c = findCustomer(acc->getCustomerId());
+        displayAccountDetails(acc, c);
     }
 };
 
 int main() {
     BankSystem system;
-    int roleChoice = 0;
+    int choice = 0;
 
-    while (roleChoice != 3) {
+    while (choice != 4) {
         cout << "\n=========================================\n";
         cout << "       CENTRAL SECURE BANKING GATEWAY    \n";
         cout << "=========================================\n";
-        cout << "1. Customer Portal (Personal Banking)\n";
-        cout << "2. Admin / Manager Portal (Bank Audits)\n";
-        cout << "3. Exit System\n";
-        cout << "Select Portal (1-3): ";
+        cout << "1. Customer Portal (Login with Customer ID)\n";
+        cout << "2. Apply for New Account / Registration\n";
+        cout << "3. Admin / Manager Portal (Approvals & Audits)\n";
+        cout << "4. Exit System\n";
+        cout << "Select Gateway (1-4): ";
 
-        if (!(cin >> roleChoice)) {
+        if (!(cin >> choice)) {
             cin.clear();
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
             continue;
         }
 
-        switch (roleChoice) {
+        switch (choice) {
             case 1: system.customerPortal(); break;
-            case 2: system.adminPortal(); break;
-            case 3: cout << "Securing database and shutting down. Goodbye!\n"; break;
-            default: cout << "Invalid portal choice.\n"; break;
+            case 2: system.applyForAccount(); break;
+            case 3: system.adminPortal(); break;
+            case 4: cout << "Securing database and shutting down. Goodbye!\n"; break;
+            default: cout << "Invalid selection.\n"; break;
         }
     }
     return 0;
