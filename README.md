@@ -43,9 +43,9 @@ BANK-System/
 │   ├── Models.cpp         # Custom pipe serialization / deserialization
 │   └── Utils.cpp          # Formatted system time generator
 ```
-## admin pass 
-admin123
-│
-├── main.cpp               # Gateway entry point
-├── README.md              # Project documentation
+⚙️ Data Persistence FormatAll data is persisted locally in pipe-delimited text files:FileFormatcustomers.txtCustomerId|Name|Mobile|Address|Age|Email|CustomerPinHashaccounts.txtAccountNumber|CustomerId|Balance|AccountTypetransactions.txtAccountNumber|Timestamp|Type|Amount|BalanceAfterfds.txtDepositId|AccountNumber|Type|Principal|TenureMonths|InterestRate|MaturityAmount|CreationDateapplications.txtAppId|CustomerId|Name|Mobile|Address|Age|Email|AccountType|InitialDeposit|PinHash|Status🚀 Getting StartedPrerequisitesA C++ compiler supporting C++17 or higher (g++ / clang++)Terminal or Bash shellBuild and RunClone the repository:Bashgit clone [https://github.com/](https://github.com/)<your-username>/<your-repo-name>.git
+cd BANK-System
+Compile using the include path:Bashg++ -std=c++17 -Iinclude src/*.cpp main.cpp -o main
+Run the executable:Bash./main
+🔑 Default CredentialsAdmin Master Key: admin123
 └── *.txt                  # Flat-file databases (auto-generated)
