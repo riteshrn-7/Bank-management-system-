@@ -37,60 +37,129 @@ vector<Account*> BankSystem::getAccountsForCustomer(int custId) {
 }
 
 bool BankSystem::authenticateCustomer(Customer* cust) {
-    string pin;
+    // 1. Immediate rejection if permanently locked
+    if (cust->isLockedPermanently()) {
+        cout << "\n[Account Locked Permanently] Excessive failed attempts across sessions.\n";
+        cout << ">> Action Required: Please visit a branch or contact Bank Administration.\n";
+        return false;
+    }
+
+    // 2. Immediate rejection if temporary cooldown is currently running
+    int remainingSec = cust->getRemainingLockSeconds();
+    if (remainingSec > 0) {
+        cout << "\n[Account Temporarily Locked] Cooldown active.\n";
+        cout << ">> Please wait " << remainingSec << " seconds before attempting again.\n";
+        return false;
+    }
+
+    // 3. PIN validation loop
     int attempts = 3;
     while (attempts > 0) {
+        string pin;
         cout << "Enter Your Customer PIN (" << attempts << " attempts remaining): ";
         cin >> pin;
-        if (cust->verifyPin(pin)) return true;
+
+        if (cust->authenticate(pin)) {
+            saveData();
+            return true;
+        }
+
         attempts--;
-        cout << "[Error] Incorrect PIN.\n";
+
+        // Check if attempts resulted in permanent lock (2nd cycle failure)
+        if (cust->isLockedPermanently()) {
+            cout << "\n[Account Locked Permanently] Second streak failed!\n";
+            cout << ">> Authentication blocked. Contact Administrator for approval.\n";
+            saveData();
+            return false; // Kick out immediately
+        }
+
+        // Check if attempts resulted in temporary lock (1st cycle failure)
+        remainingSec = cust->getRemainingLockSeconds();
+        if (remainingSec > 0) {
+            cout << "\n[Account Locked] 3 incorrect attempts recorded.\n";
+            cout << ">> Temporary lockout triggered: Please wait " << remainingSec << " seconds.\n";
+            saveData();
+            return false; // Kick out immediately
+        }
+
+        if (attempts > 0) {
+            cout << "[Error] Incorrect PIN.\n";
+        }
     }
-    cout << "[Access Denied] Authentication attempts exceeded.\n";
+
+    saveData();
     return false;
 }
 
 void BankSystem::loadData() {
+    // 1. In-memory state cleanup
     customers.clear();
     for (auto* a : accounts) delete a;
     accounts.clear();
     transactions.clear();
     deposits.clear();
     applications.clear();
+    loans.clear();
 
-    ifstream cIn(customerFile);
     string line;
-    while (getline(cIn, line)) {
-        if (!line.empty()) customers.push_back(Customer::deserialize(line));
-    }
-    cIn.close();
 
-    ifstream aIn(accountFile);
-    while (getline(aIn, line)) {
-        if (!line.empty()) {
-            Account* acc = Account::deserialize(line);
-            if (acc) accounts.push_back(acc);
+    // 2. Load Customers
+    ifstream cIn(customerFile);
+    if (cIn.is_open()) {
+        while (getline(cIn, line)) {
+            if (!line.empty()) customers.push_back(Customer::deserialize(line));
         }
+        cIn.close();
     }
-    aIn.close();
 
+    // 3. Load Accounts
+    ifstream aIn(accountFile);
+    if (aIn.is_open()) {
+        while (getline(aIn, line)) {
+            if (!line.empty()) {
+                Account* acc = Account::deserialize(line);
+                if (acc) accounts.push_back(acc);
+            }
+        }
+        aIn.close();
+    }
+
+    // 4. Load Transactions
     ifstream tIn(transactionFile);
-    while (getline(tIn, line)) {
-        if (!line.empty()) transactions.push_back(Transaction::deserialize(line));
+    if (tIn.is_open()) {
+        while (getline(tIn, line)) {
+            if (!line.empty()) transactions.push_back(Transaction::deserialize(line));
+        }
+        tIn.close();
     }
-    tIn.close();
 
+    // 5. Load Fixed Deposits
     ifstream fIn(fdFile);
-    while (getline(fIn, line)) {
-        if (!line.empty()) deposits.push_back(FixedDeposit::deserialize(line));
+    if (fIn.is_open()) {
+        while (getline(fIn, line)) {
+            if (!line.empty()) deposits.push_back(FixedDeposit::deserialize(line));
+        }
+        fIn.close();
     }
-    fIn.close();
 
+    // 6. Load Applications
     ifstream appIn(appFile);
-    while (getline(appIn, line)) {
-        if (!line.empty()) applications.push_back(AccountApplication::deserialize(line));
+    if (appIn.is_open()) {
+        while (getline(appIn, line)) {
+            if (!line.empty()) applications.push_back(AccountApplication::deserialize(line));
+        }
+        appIn.close();
     }
-    appIn.close();
+
+    // 7. Load Loans
+    ifstream lIn(loanFile);
+    if (lIn.is_open()) {
+        while (getline(lIn, line)) {
+            if (!line.empty()) loans.push_back(Loan::deserialize(line));
+        }
+        lIn.close();
+    }
 }
 
 void BankSystem::saveData() {
@@ -113,11 +182,16 @@ void BankSystem::saveData() {
     ofstream appOut(appFile);
     for (const auto& ap : applications) appOut << ap.serialize() << "\n";
     appOut.close();
+
+    ofstream lOut(loanFile);
+    for (const auto& l : loans) lOut << l.serialize() << "\n";
+    lOut.close(); 
 }
 
 BankSystem::BankSystem() {
     loadData();
 }
+
 
 BankSystem::~BankSystem() {
     for (auto* a : accounts) delete a;
@@ -203,10 +277,13 @@ void BankSystem::applyForAccount() {
     }
 
     int appId = applications.empty() ? 3001 : applications.back().appId + 1;
-    hash<string> hasher;
-    size_t pHash = (hasExistingId == 'y') ? 0 : hasher(pin);
+    
+    // Generate fresh salt and compute salted hash
+    string custSalt = (hasExistingId == 'y') ? "" : generateSalt();
+    size_t pHash = (hasExistingId == 'y') ? 0 : computeSaltedHash(pin, custSalt);
 
-    applications.push_back({appId, existingCustId, name, mobile, address, age, email, accType, initialDeposit, pHash, "PENDING"});
+    // Store salt together with the application record
+       applications.push_back({appId, existingCustId, name, mobile, address, age, email, accType, initialDeposit, pHash, custSalt, "PENDING"});
     saveData();
 
     cout << "\n[Application Submitted Successfully!]\n";
@@ -598,7 +675,7 @@ void BankSystem::adminPortal() {
     }
 
     int choice = 0;
-    while (choice != 8) {
+    while (choice != 9) {
         cout << "\n=========================================\n";
         cout << "       ADMIN & AUDIT CONTROL PANEL       \n";
         cout << "=========================================\n";
@@ -609,8 +686,9 @@ void BankSystem::adminPortal() {
         cout << "5. Run Monthly Account Maintenance Audit\n";
         cout << "6. Inspect Master Statement of an Account\n";
         cout << "7. Direct Admin Account Onboarding\n";
-        cout << "8. Return to Gateway\n";
-        cout << "Select (1-8): ";
+        cout << "8. Unlock Customer Account\n";
+        cout << "9. Return to Gateway\n";
+        cout << "Select (1-9): ";
 
         if (!(cin >> choice)) { clearBuffer(); continue; }
 
@@ -622,7 +700,8 @@ void BankSystem::adminPortal() {
             case 5: runMonthlyMaintenanceCycle(); break;
             case 6: inspectMasterStatement(); break;
             case 7: directAdminOnboarding(); break;
-            case 8: cout << "Exited admin control panel.\n"; break;
+            case 8: unlockCustomerAccount(); break;
+            case 9: cout << "Exited admin control panel.\n"; break;
             default: cout << "Invalid option.\n"; break;
         }
     }
@@ -658,13 +737,15 @@ void BankSystem::processApplications() {
             cin >> decision;
             decision = toupper(decision);
 
-            if (decision == 'A') {
-                app.status = "APPROVED";
-                int assignedCustId = app.customerId;
-                if (assignedCustId == 0) {
-                    assignedCustId = customers.empty() ? 5001 : customers.back().getCustomerId() + 1;
-                    customers.emplace_back(assignedCustId, app.name, app.mobile, app.address, app.age, app.email, app.pinHash);
-                }
+           if (decision == 'A') {
+        app.status = "APPROVED";
+        int assignedCustId = app.customerId;
+        if (assignedCustId == 0) {
+            assignedCustId = customers.empty() ? 5001 : customers.back().getCustomerId() + 1;
+            // AccountApplication does not persist a salt field; store the validated hash and
+            // keep the default empty salt for newly approved applicants.
+            customers.emplace_back(assignedCustId, app.name, app.mobile, app.address, app.age, app.email, app.salt);
+        }
 
                 int newAccNum = accounts.empty() ? 10001 : accounts.back()->getAccountNumber() + 1;
                 if (app.accountType == "SAVINGS") {
@@ -734,11 +815,13 @@ void BankSystem::directAdminOnboarding() {
         clearBuffer();
     }
 
-    int custId = customers.empty() ? 5001 : customers.back().getCustomerId() + 1;
+   int custId = customers.empty() ? 5001 : customers.back().getCustomerId() + 1;
     int accNum = accounts.empty() ? 10001 : accounts.back()->getAccountNumber() + 1;
 
-    hash<string> hasher;
-    customers.emplace_back(custId, name, mobile, address, age, email, hasher(pin));
+    string custSalt = generateSalt();
+    size_t pHash = computeSaltedHash(pin, custSalt);
+
+    customers.emplace_back(custId, name, mobile, address, age, email, pHash, custSalt);
 
     if (typeChoice == 1) {
         accounts.push_back(new SavingsAccount(accNum, custId, initialDeposit));
@@ -846,4 +929,49 @@ void BankSystem::inspectMasterStatement() {
 
     Customer* c = findCustomer(acc->getCustomerId());
     displayAccountDetails(acc, c);
+}
+void BankSystem::applyForLoan(Customer* cust) {
+    std::cout << "\n--- Apply for Loan / Credit Card Line ---\n";
+    std::cout << "1. Personal Loan (12% APR)\n";
+    std::cout << "2. Home Loan (8.5% APR)\n";
+    std::cout << "3. Credit Card Limit Setup (18% APR)\n";
+    std::cout << "Select Type (1-3): ";
+    int choice;
+    std::cin >> choice;
+
+    std::string type = "PERSONAL";
+    double rate = 12.0;
+    if (choice == 2) { type = "HOME"; rate = 8.5; }
+    else if (choice == 3) { type = "CREDIT_CARD"; rate = 18.0; }
+
+    std::cout << "Enter Principal Amount: $";
+    double principal;
+    std::cin >> principal;
+
+    std::cout << "Enter Tenure in Months: ";
+    int tenure;
+    std::cin >> tenure;
+
+    double emi = Loan::calculateEmi(principal, rate, tenure);
+    int nextId = loans.empty() ? 5001 : loans.back().loanId + 1;
+
+    loans.push_back({nextId, cust->getCustomerId(), type, principal, rate, tenure, emi, principal, "ACTIVE"});
+    saveData();
+
+    std::cout << "Loan Approved & Disbursed! ID: " << nextId << " | Monthly EMI: $" << emi << "\n";
+}
+void BankSystem::unlockCustomerAccount() {
+    int custId;
+    cout << "\nEnter Customer ID to Unlock: ";
+    if (!(cin >> custId)) { clearBuffer(); return; }
+
+    Customer* cust = findCustomer(custId);
+    if (!cust) {
+        cout << "[Error] Customer ID not found.\n";
+        return;
+    }
+
+    cust->unlockByAdmin();
+    saveData();
+    cout << "[Success] Customer ID " << custId << " has been unlocked and reset.\n";
 }

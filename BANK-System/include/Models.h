@@ -14,6 +14,7 @@ struct AccountApplication {
     std::string accountType;
     double initialDeposit;
     size_t pinHash;
+    std::string salt;
     std::string status;
 
     std::string serialize() const;
@@ -43,4 +44,19 @@ struct FixedDeposit {
 
     std::string serialize() const;
     static FixedDeposit deserialize(const std::string& line);
+};
+struct Loan {
+    int loanId;
+    int customerId;
+    std::string loanType; // "PERSONAL", "HOME", "CREDIT_CARD"
+    double principal;
+    double interestRate;
+    int tenureMonths;
+    double monthlyEmi;
+    double remainingBalance;
+    std::string status;   // "ACTIVE", "PAID"
+
+    std::string serialize() const;
+    static Loan deserialize(const std::string& line);
+    static double calculateEmi(double principal, double annualRate, int months);
 };

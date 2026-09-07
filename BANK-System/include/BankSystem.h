@@ -7,28 +7,29 @@
 
 class BankSystem {
 private:
-    std::vector<Customer> customers;
-    std::vector<Account*> accounts;
-    std::vector<Transaction> transactions;
-    std::vector<FixedDeposit> deposits;
-    std::vector<AccountApplication> applications;
-
     const std::string customerFile = "customers.txt";
     const std::string accountFile = "accounts.txt";
     const std::string transactionFile = "transactions.txt";
     const std::string fdFile = "fds.txt";
     const std::string appFile = "applications.txt";
+    const std::string loanFile = "loans.txt";
     const std::string adminPin = "admin123";
 
+    std::vector<Customer> customers;
+    std::vector<Account*> accounts;
+    std::vector<Transaction> transactions;
+    std::vector<FixedDeposit> deposits;
+    std::vector<AccountApplication> applications;
+    std::vector<Loan> loans;
+
+    // Helpers
     void clearBuffer();
     Customer* findCustomer(int id);
     Account* findAccount(int accNum);
     std::vector<Account*> getAccountsForCustomer(int custId);
     bool authenticateCustomer(Customer* cust);
 
-    void loadData();
-    void saveData();
-
+    // Account Actions
     void manageSingleAccount(Account* acc, Customer* cust);
     void executeInternalTransfer(const std::vector<Account*>& myAccounts);
     void deposit(Account* acc);
@@ -39,18 +40,26 @@ private:
     void exportStatementCSV(Account* acc, Customer* cust);
     void displayAccountDetails(Account* acc, Customer* cust);
 
+    // Admin Panel Actions
     int countPendingApplications();
     void processApplications();
-    void directAdminOnboarding();
     void viewBankReserves();
     void listAllAccounts();
     void updateCustomer();
     void runMonthlyMaintenanceCycle();
     void inspectMasterStatement();
+    void directAdminOnboarding();
+    void unlockCustomerAccount();
+
+    // Loan Operations
+    void applyForLoan(Customer* cust);
 
 public:
     BankSystem();
     ~BankSystem();
+
+    void loadData();
+    void saveData();
 
     void applyForAccount();
     void customerPortal();
