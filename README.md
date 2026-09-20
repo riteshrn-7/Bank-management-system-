@@ -1,5 +1,3 @@
-
-
 # 🏦 Bank Management System
 
 A robust, resume-ready console banking application built with **C++17**, featuring an industry-standard modular multi-file architecture, object-oriented design, file-based persistence, and role-based security controls.
@@ -38,9 +36,42 @@ BANK-System/
 │   ├── Customer.cpp       # Profile mutation & PIN validation logic
 │   ├── Models.cpp         # Custom pipe serialization / deserialization
 │   └── Utils.cpp          # Formatted system time generator
-```
-🔑 Default Credentials
-System Role: System Administrator / Manager
-Admin Master Key: admin123
+│
+└── *.txt                  # Flat-file databases (auto-generated) 
 
-└── *.txt                  # Flat-file databases (auto-generated)
+🛠️ Tech Stack & Prerequisites
+Language: C++11 / C++17
+
+Compiler: g++ (Linux/macOS) or mingw-w64 (Windows)
+
+Standard Libraries: <iostream>, <fstream>, <vector>, <thread>, <chrono>, <cmath>
+
+Database: Local .txt flat-file storage (State is persisted automatically).
+
+🚀 Installation & Setup Instructions
+Ensure your terminal is navigated to the root BANK-System/ directory where main.cpp is located.
+
+Option 1: Linux / macOS (Native Compilation)
+Bash
+# Compile the binary
+g++ main.cpp src/BankSystem.cpp src/Account.cpp src/Customer.cpp src/Models.cpp src/Utils.cpp -I include -o bank_app
+
+# Execute the application
+./bank_app
+Option 2: Windows (MinGW Cross-Compilation)
+If you are developing in Linux/WSL but need a native .exe for Windows, use static linking to prevent missing DLL errors:
+
+Bash
+# Compile the Windows Executable
+x86_64-w64-mingw32-g++ main.cpp src/BankSystem.cpp src/Account.cpp src/Customer.cpp src/Models.cpp src/Utils.cpp -I include -static -static-libgcc -static-libstdc++ -o bank_app.exe
+
+# Execute the application (in CMD/PowerShell)
+./bank_app.exe
+(Note: If compiling directly inside a Windows IDE like Visual Studio or Code::Blocks, simply import all source files and click "Build & Run".)
+
+🛡️ Default Credentials
+To test administrative approval flows and audits, use the default manager key:
+
+Portal: Admin / Manager Portal
+
+Master Admin Key: 1234 (Configurable in BankSystem.cpp constructor)
